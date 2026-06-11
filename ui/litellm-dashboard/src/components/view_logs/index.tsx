@@ -21,7 +21,7 @@ import KeyInfoView from "../templates/key_info_view";
 import AuditLogs from "./audit_logs";
 import { createColumns, LogEntry, type LogsSortField } from "./columns";
 import { ConfigInfoMessage } from "./ConfigInfoMessage";
-import { AGENT_CALL_TYPES, ERROR_CODE_OPTIONS, MCP_CALL_TYPES, QUICK_SELECT_OPTIONS } from "./constants";
+import { ERROR_CODE_OPTIONS, QUICK_SELECT_OPTIONS } from "./constants";
 import { CostBreakdownViewer } from "./CostBreakdownViewer";
 import { ErrorViewer } from "./ErrorViewer";
 import { FILTER_KEYS, useLogFilterLogic } from "./log_filter_logic";
@@ -307,57 +307,14 @@ export default function SpendLogsTable({
     return matchesSearch;
   });
 
-  const sessionCompositionById = searchedLogs.reduce<Record<string, { llm: number; agent: number; mcp: number }>>((acc, log) => {
-    if (!log.session_id) return acc;
-    if (!acc[log.session_id]) {
-      acc[log.session_id] = { llm: 0, agent: 0, mcp: 0 };
-    }
-    if (MCP_CALL_TYPES.includes(log.call_type)) {
-      acc[log.session_id].mcp += 1;
-    } else if (AGENT_CALL_TYPES.includes(log.call_type)) {
-      acc[log.session_id].agent += 1;
-    } else {
-      acc[log.session_id].llm += 1;
-    }
-    return acc;
-  }, {});
-
-  // Build a single-pass map of session_id → representative request_id.
-  // Prefers an LLM row over an MCP row as the representative.
-  const sessionRepresentativeMap = new Map<string, { requestId: string; isMcp: boolean }>();
-  for (const log of searchedLogs) {
-    if (!log.session_id || (log.session_total_count || 1) <= 1) continue;
-    const isMcp = MCP_CALL_TYPES.includes(log.call_type);
-    const existing = sessionRepresentativeMap.get(log.session_id);
-    if (!existing || (existing.isMcp && !isMcp)) {
-      sessionRepresentativeMap.set(log.session_id, { requestId: log.request_id, isMcp });
-    }
-  }
-
   const filteredData =
     searchedLogs
       .map((log) => {
-        const sessionComposition = log.session_id ? sessionCompositionById[log.session_id] : undefined;
         return {
           ...log,
           request_duration_ms: log.request_duration_ms,
-          session_llm_count: sessionComposition?.llm ?? undefined,
-          session_mcp_count: sessionComposition?.mcp ?? undefined,
-          session_agent_count: sessionComposition?.agent ?? undefined,
           onKeyHashClick: (keyHash: string) => setSelectedKeyIdInfoView(keyHash),
-          onSessionClick: (sessionId: string) => {
-            if (sessionId) {
-              setSelectedSessionId(sessionId);
-              setSelectedLog(log);
-              setIsDrawerOpen(true);
-            }
-          },
         };
-      })
-      // Deduplicate multi-call sessions using the pre-built map (O(1) per row).
-      .filter((log) => {
-        if (!log.session_id || (log.session_total_count || 1) <= 1) return true;
-        return sessionRepresentativeMap.get(log.session_id)?.requestId === log.request_id;
       }) || [];
 
   // Add this function to handle manual refresh
@@ -373,14 +330,6 @@ export default function SpendLogsTable({
   };
 
   const handleRowClick = (log: LogEntry) => {
-    // Multi-call session row: open in the same right-side drawer (session mode)
-    if (log.session_id && (log.session_total_count || 1) > 1) {
-      setSelectedSessionId(log.session_id);
-      setSelectedLog(log);
-      setIsDrawerOpen(true);
-      return;
-    }
-    // Single-call row: open the detail drawer
     setSelectedSessionId(null);
     setSelectedLog(log);
     setIsDrawerOpen(true);
